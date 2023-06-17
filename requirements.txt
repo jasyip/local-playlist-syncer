@@ -1,0 +1,2 @@
+yt_dlp
+pygtrie == 2.*
