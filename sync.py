@@ -53,10 +53,15 @@ def output_directory(x):
 
 
 def main(*args, **kwargs):
+
+    default_config_files = []
+    for path in (*os.getenv("XDG_CONFIG_DIRS", "/etc/xdg").split(":"), os.getenv("XDG_CONFIG_HOME", "~/.config")):
+        default_config_files.append(os.path.join(path, "local-playlist-syncer", "config"))
+
     parser = ArgumentParser(
-        add_config_file_help=False,
+        # add_config_file_help=False,
         args_for_setting_config_path=("-c", "--config"),
-        default_config_files=[],
+        default_config_files=default_config_files,
     )
 
     parser.add_argument("spreadsheet", type=Path, help="spreadsheet in csv format")
