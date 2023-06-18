@@ -1,12 +1,9 @@
 import logging
 import re
 from collections import namedtuple
-from pprint import pformat
 
 from configargparse import ArgumentParser
 from pygtrie import Trie
-
-_logger = logging.getLogger(__name__)
 
 _log_level_trie = Trie()
 
@@ -28,7 +25,6 @@ def log_level_value(l):
         value_set = set(_log_level_trie.itervalues(prefix=as_identifier, shallow=True))
         if len(value_set) == 1:
             value = next(iter(value_set))
-            _logger.debug(f"logging level {l} reinterpreted as {value}")
             return value
 
         raise ValueError(f"log level {l} is ambiguous")
@@ -57,7 +53,6 @@ def add_log_level_flags(
             log_levels.append(
                 _LogLevel(original_name, to_identifier(original_name), value)
             )
-    _logger.debug(f"logging levels: {log_levels}")
 
     to_delete = set()
     for log_level in sorted(log_levels, key=lambda p: len(p.standardized_name)):
@@ -69,16 +64,13 @@ def add_log_level_flags(
 
         _log_level_trie[log_level.standardized_name] = log_level.value
 
-    _logger.debug(f"redundant logging levels: {to_delete}")
-
     temp_log_levels_list = []
     for log_level in log_levels:
         if log_level.standardized_name not in to_delete:
             temp_log_levels_list.append(log_level)
     log_levels = temp_log_levels_list
 
-    log_level_group = parser.add_mutually_exclusive_group()
-    log_level_group.add_argument(
+    parser.add_argument(
         log_level_short_flag,
         log_level_long_flag or "--" + to_identifier(dest, delim="-"),
         dest=dest,
@@ -90,7 +82,7 @@ def add_log_level_flags(
 
     for log_level in log_levels:
         log_level_short_flag = kwargs.pop(log_level.standardized_name, None)
-        log_level_group.add_argument(
+        parser.add_argument(
             *([log_level_short_flag] if log_level_short_flag else []),
             "--" + log_level.standardized_name,
             dest=dest,
