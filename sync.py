@@ -27,6 +27,9 @@ __version__ = "0.1.0"
 import argparse
 import csv
 import logging
+import os
+import shlex
+import shutil
 from pathlib import Path
 
 from configargparse import ArgumentParser
@@ -64,10 +67,9 @@ def main(*args, **kwargs):
         "-a",
         "--use-aria2c",
         action=argparse.BooleanOptionalAction,
-        default=True,
         help="use aria2c as external downloader",
     )
-    parser.add_argument("-y", "--yt-dlp-options", default="")
+    parser.add_argument("-y", "--yt-dlp-options", default="", type=shlex.split)
 
     log_level_group = parser.add_argument_group(
         "logging"
@@ -89,6 +91,20 @@ def main(*args, **kwargs):
     if args.log_level is not False:
         logging.basicConfig(level=args.log_level)
     _logger.debug(f"parsed arguments: {args}")
+
+    if args.use_aria2c is not False:
+        aria2c_path = shutil.which("aria2c", mode=os.X_OK)
+        if aria2c_path is not None:
+            args.yt_dlp_options.extend(
+                (
+                    "--external-downloader",
+                    aria2c_path,
+                    "--external-downloader-args",
+                    "-c -j 3 -x 3 -s 3 -k 1M",
+                )
+            )
+        elif args.use_aria2c:
+            parser.error("--use-aria2c was specified but cannot locate executable")
 
 
 if __name__ == "__main__":
