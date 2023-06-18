@@ -1,2 +1,3 @@
 yt_dlp
-pygtrie == 2.*
+pygtrie ~= 2.5
+ConfigArgParse ~= 1.5
