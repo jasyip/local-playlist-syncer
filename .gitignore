@@ -161,6 +161,25 @@ cython_debug/
 
 # Custom
 /media/
-*.csv
-*.parquet
-*.json
+
+/*.csv
+
+/*.json
+/*.ndjson
+
+/*.avro
+/*.arrow
+/*.feather
+/*.parquet
+
+/*.xls
+/*.xls[xmb]
+# Excel temporary
+/~$*.xls*
+# Excel Backup File
+/*.xlk
+
+# SQL
+/*.db
+/*.sql
+/*.sqlite

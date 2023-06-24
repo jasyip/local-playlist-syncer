@@ -74,7 +74,7 @@ def add_log_level_flags(
         log_level_short_flag,
         log_level_long_flag or "--" + to_identifier(dest, delim="-"),
         dest=dest,
-        default=0,
+        default=logging.WARNING,
         type=log_level_value,
         help=f"set logging level",
         env_var=env_var,

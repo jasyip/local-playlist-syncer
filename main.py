@@ -26,10 +26,13 @@ __version__ = "0.1.0"
 
 import argparse
 import logging
+import io
 import os
+import re
 import shlex
 import shutil
-from pathlib import Path
+import sys
+from pathlib import PurePath, Path
 import polars
 
 from configargparse import ArgumentParser
@@ -40,6 +43,26 @@ import sync
 _logger = logging.getLogger(__name__)
 
 
+
+_filetype_map = (
+    (re.compile(r"xls[xmb]?"), "excel"),
+)
+
+
+def scan_spreadsheet(parser, f, *, format=None):
+    match (f, format):
+        case ("-", None):
+            parser.error("format must be specified when reading from stdin")
+        case ("-", _):
+            f = sys.stdin.buffer
+            object.__setattr__(f, "name", None)
+        case (_, None):
+            format = PurePath(f).suffix.removeprefix(".")
+            for file_type_regex, destination_format in _filetype_map:
+                if file_type_regex.fullmatch(format):
+                    format = destination_format
+                    break
+    return getattr(polars, "read_" + format)(f)
 
 
 def main(*args, **kwargs):
@@ -58,9 +81,12 @@ def main(*args, **kwargs):
         default_config_files=default_config_files,
     )
 
-    parser.add_argument("spreadsheet", type=Path, help="spreadsheet in csv format")
+    parser.add_argument("spreadsheet", help="either a spreadsheet (in csv/Apache Parquet/JSON/Excel Spreadsheet format), or '-' to read data from standard input")
     parser.add_argument(
         "-o", "--output", type=Path, default="media", help="output folder"
+    )
+    parser.add_argument(
+        "-f", "--format", help="spreadsheet format (automatically inferred from file extension, mandatory for standard input data)"
     )
     parser.add_argument(
         "-a",
@@ -106,7 +132,7 @@ def main(*args, **kwargs):
             parser.error("--use-aria2c was specified but cannot locate executable")
 
     args.output.mkdir(parents=True, exist_ok=True)
-    spreadsheet = getattr(polars, "read_" + args.spreadsheet.suffix.removeprefix("."))(args.spreadsheet)
+    spreadsheet = scan_spreadsheet(parser, args.spreadsheet, format=args.format)
     print(sync.download(spreadsheet).head())
 
 
