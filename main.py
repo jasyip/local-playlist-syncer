@@ -25,31 +25,29 @@ __license__ = "GNU Affero General Public License"
 __version__ = "0.1.0"
 
 import argparse
-import logging
 import io
+import logging
 import os
 import re
 import shlex
 import shutil
 import sys
-from pathlib import PurePath, Path
-import polars
+from pathlib import Path, PurePath
 
+import polars
 from configargparse import ArgumentParser
 
 import config
 import sync
+import yt_dlp
 
 _logger = logging.getLogger(__name__)
 
 
-
-_filetype_map = (
-    (re.compile(r"xls[xmb]?"), "excel"),
-)
+_filetype_map = ((re.compile(r"xls[xmb]?"), "excel"),)
 
 
-def scan_spreadsheet(parser, f, *, format=None):
+def scan_spreadsheet(f, /, parser, *, format=None):
     match (f, format):
         case ("-", None):
             parser.error("format must be specified when reading from stdin")
@@ -62,7 +60,11 @@ def scan_spreadsheet(parser, f, *, format=None):
                 if file_type_regex.fullmatch(format):
                     format = destination_format
                     break
-    return getattr(polars, "read_" + format)(f)
+
+    read_method = getattr(polars, "scan_" + format, getattr(polars, "read_" + format, None))
+    if read_method is None:
+        parser.error("unparseable spreadsheet format")
+    return read_method(f)
 
 
 def main(*args, **kwargs):
@@ -81,12 +83,23 @@ def main(*args, **kwargs):
         default_config_files=default_config_files,
     )
 
-    parser.add_argument("spreadsheet", help="either a spreadsheet (in csv/Apache Parquet/JSON/Excel Spreadsheet format), or '-' to read data from standard input")
+    parser.add_argument(
+        "spreadsheet",
+        help="either a spreadsheet (in csv/Apache Parquet/JSON/Excel Spreadsheet format), or '-' to read data from standard input",
+    )
     parser.add_argument(
         "-o", "--output", type=Path, default="media", help="output folder"
     )
     parser.add_argument(
-        "-f", "--format", help="spreadsheet format (automatically inferred from file extension, mandatory for standard input data)"
+        "-f",
+        "--format",
+        help="spreadsheet format (automatically inferred from file extension, mandatory for standard input data)",
+    )
+    parser.add_argument(
+        "-1",
+        "--just-one",
+        action="store_true",
+        help="sync just the first one as a trial",
     )
     parser.add_argument(
         "-a",
@@ -117,23 +130,30 @@ def main(*args, **kwargs):
         logging.basicConfig(level=args.log_level)
     _logger.debug(f"parsed arguments: {args}")
 
-    if args.use_aria2c is not False:
-        aria2c_path = shutil.which("aria2c", mode=os.X_OK)
-        if aria2c_path is not None:
-            args.yt_dlp_options.extend(
-                (
-                    "--external-downloader",
-                    aria2c_path,
-                    "--external-downloader-args",
-                    "-c -j 3 -x 3 -s 3 -k 1M",
-                )
-            )
-        elif args.use_aria2c:
+    if args.use_aria2c:
+        if shutil.which("aria2c", mode=os.X_OK) is None:
             parser.error("--use-aria2c was specified but cannot locate executable")
 
+        args.yt_dlp_options.extend(
+            (
+                "--downloader",
+                "aria2c",
+                "--downloader-args",
+                "aria2c:-c -j 3 -x 3 -s 3 -k 1M",
+            )
+        )
+
     args.output.mkdir(parents=True, exist_ok=True)
-    spreadsheet = scan_spreadsheet(parser, args.spreadsheet, format=args.format)
-    print(sync.download(spreadsheet).head())
+    spreadsheet = scan_spreadsheet(args.spreadsheet, parser, format=args.format)
+    _logger.debug(f"{args.yt_dlp_options=}")
+    print(
+        sync.download(
+            spreadsheet,
+            output=args.output,
+            yt_dlp_options=yt_dlp.parse_options(args.yt_dlp_options).ydl_opts,
+            just_one=args.just_one,
+        ).head()
+    )
 
 
 if __name__ == "__main__":
