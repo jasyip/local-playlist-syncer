@@ -142,15 +142,27 @@ def main(*args, **kwargs):
                 "aria2c:-c -j 3 -x 3 -s 3 -k 1M",
             )
         )
+    args.yt_dlp_options
 
     args.output.mkdir(parents=True, exist_ok=True)
     spreadsheet = scan_spreadsheet(args.spreadsheet, parser, format=args.format)
-    _logger.debug(f"{args.yt_dlp_options=}")
+    ydl_opts = vars(yt_dlp.parseOpts(args.yt_dlp_options, ignore_config_files=False)[1])
+    for k, v in vars(yt_dlp.parse_options([])).items():
+        if k in ydl_opts and v == ydl_opts[k]:
+            del ydl_opts[k]
+    bad_default_options = {
+        "download_ranges" : None
+    }
+    for k, v in bad_default_options.items():
+        if k in ydl_opts and v == ydl_opts[k]:
+            del ydl_opts[k]
+
+    _logger.debug(f"options to pass to YoutubeDL object: {ydl_opts=}")
     print(
         sync.download(
             spreadsheet,
             output=args.output,
-            yt_dlp_options=yt_dlp.parse_options(args.yt_dlp_options).ydl_opts,
+            yt_dlp_options=ydl_opts,
             just_one=args.just_one,
         ).head()
     )
