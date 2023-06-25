@@ -44,28 +44,49 @@ import yt_dlp
 _logger = logging.getLogger(__name__)
 
 
-_filetype_map = ((re.compile(r"xls[xmb]?"), "excel"),)
+_filetype_map = (
+    (r"xls[xmb]?", "excel"),
+    (r"(feather|arrow)", "ipc"),
+)
 
 
-def scan_spreadsheet(f, /, parser, *, format=None):
-    match (f, format):
-        case ("-", None):
+def scan_spreadsheet(f, /, parser, *, queries, format):
+    match (f, bool(queries), format):
+        case ("-", _, None):
             parser.error("format must be specified when reading from stdin")
-        case ("-", _):
+        case ("-", True, _):
+            parser.error("both database connection and queries must be provided through command line")
+        case ("-", False, _):
             f = sys.stdin.buffer
-            object.__setattr__(f, "name", None)
-        case (_, None):
+            # object.__setattr__(f, "name", None)
+        case (_, False, None):
             format = PurePath(f).suffix.removeprefix(".")
             for file_type_regex, destination_format in _filetype_map:
-                if file_type_regex.fullmatch(format):
+                if re.fullmatch(file_type_regex, format):
                     format = destination_format
                     break
+        case (_, True, None):
+            format = "database"
 
-    read_method = getattr(polars, "scan_" + format, getattr(polars, "read_" + format, None))
+    read_method = getattr(polars, "read_" + format, None)
+    if isinstance(f, os.PathLike):
+        read_method = getattr(polars, "scan_" + format, read_method)
     if read_method is None:
         parser.error("unparseable spreadsheet format")
-    return read_method(f)
+    return read_method(queries, f) if format == "database" else read_method(f)
 
+
+def convert_yt_dlp_args(options, /):
+    ydl_opts = vars(yt_dlp.parseOpts(options, ignore_config_files=False)[1])
+    bad_default_options = {
+        "download_ranges" : None
+    }
+
+    for reference_options in (vars(yt_dlp.parse_options([]).options), bad_default_options):
+        for k, v in reference_options.items():
+            if k in ydl_opts and v == ydl_opts[k]:
+                del ydl_opts[k]
+    return ydl_opts
 
 def main(*args, **kwargs):
     default_config_files = []
@@ -93,7 +114,13 @@ def main(*args, **kwargs):
     parser.add_argument(
         "-f",
         "--format",
-        help="spreadsheet format (automatically inferred from file extension, mandatory for standard input data)",
+        help="spreadsheet format (automatically inferred from file extension, mandatory for standard input data or URL input)",
+    )
+    parser.add_argument(
+        "-a",
+        "--abort-on-error",
+        action="store_true",
+        help="Abort after finishing processing of an erroneous entry",
     )
     parser.add_argument(
         "-1",
@@ -102,10 +129,12 @@ def main(*args, **kwargs):
         help="sync just the first one as a trial",
     )
     parser.add_argument(
-        "-a",
-        "--use-aria2c",
-        action=argparse.BooleanOptionalAction,
-        help="use aria2c as external downloader",
+        "-q",
+        "--query",
+        nargs='+',
+        dest="queries",
+        action="extend",
+        help="SQL queries to read the data (provide connection URI to spreadsheet argument)",
     )
     parser.add_argument("-y", "--yt-dlp-options", default="", type=shlex.split)
 
@@ -116,7 +145,6 @@ def main(*args, **kwargs):
         log_level_group, "log_level", "-l", env_var="LPS_LOG_LEVEL", debug="-d"
     )
     log_level_group.add_argument(
-        "-q",
         "--quiet",
         action="store_const",
         dest="log_level",
@@ -130,33 +158,10 @@ def main(*args, **kwargs):
         logging.basicConfig(level=args.log_level)
     _logger.debug(f"parsed arguments: {args}")
 
-    if args.use_aria2c:
-        if shutil.which("aria2c", mode=os.X_OK) is None:
-            parser.error("--use-aria2c was specified but cannot locate executable")
-
-        args.yt_dlp_options.extend(
-            (
-                "--downloader",
-                "aria2c",
-                "--downloader-args",
-                "aria2c:-c -j 3 -x 3 -s 3 -k 1M",
-            )
-        )
-    args.yt_dlp_options
-
     args.output.mkdir(parents=True, exist_ok=True)
-    spreadsheet = scan_spreadsheet(args.spreadsheet, parser, format=args.format)
-    ydl_opts = vars(yt_dlp.parseOpts(args.yt_dlp_options, ignore_config_files=False)[1])
-    for k, v in vars(yt_dlp.parse_options([])).items():
-        if k in ydl_opts and v == ydl_opts[k]:
-            del ydl_opts[k]
-    bad_default_options = {
-        "download_ranges" : None
-    }
-    for k, v in bad_default_options.items():
-        if k in ydl_opts and v == ydl_opts[k]:
-            del ydl_opts[k]
+    spreadsheet = scan_spreadsheet(args.spreadsheet, parser, queries=args.queries, format=args.format)
 
+    ydl_opts = convert_yt_dlp_args(args.yt_dlp_options)
     _logger.debug(f"options to pass to YoutubeDL object: {ydl_opts=}")
     print(
         sync.download(
