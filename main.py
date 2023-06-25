@@ -26,6 +26,7 @@ __version__ = "0.1.0"
 
 import argparse
 import io
+import urllib.parse
 import logging
 import os
 import re
@@ -50,30 +51,41 @@ _filetype_map = (
 )
 
 
-def scan_spreadsheet(f, /, parser, *, queries, format):
-    match (f, bool(queries), format):
+def scan_spreadsheet(x, /, parser, *, queries, format):
+    scan_file_path = True
+    match (x, bool(queries), format):
         case ("-", _, None):
             parser.error("format must be specified when reading from stdin")
         case ("-", True, _):
             parser.error("both database connection and queries must be provided through command line")
         case ("-", False, _):
-            f = sys.stdin.buffer
-            # object.__setattr__(f, "name", None)
+            x = sys.stdin.buffer
+            scan_file_path = False
+            # object.__setattr__(x, "name", None)
         case (_, False, None):
-            format = PurePath(f).suffix.removeprefix(".")
-            for file_type_regex, destination_format in _filetype_map:
-                if re.fullmatch(file_type_regex, format):
-                    format = destination_format
-                    break
+            if urllib.parse.urlsplit(x).scheme == "":
+                format = Path(x).suffix.removeprefix(".")
+                for file_type_regex, destination_format in _filetype_map:
+                    if re.fullmatch(file_type_regex, format):
+                        format = destination_format
+                        break
         case (_, True, None):
             format = "database"
 
-    read_method = getattr(polars, "read_" + format, None)
-    if isinstance(f, os.PathLike):
+    if not format:
+        parser.error("could not infer spreadsheet format, please specify manually using '-f'")
+    try:
+        read_method = getattr(polars, "read_" + format)
+    except AttributeError:
+        parser.error(f"unsupported spreadsheet format '{format}'")
+    if scan_file_path:
         read_method = getattr(polars, "scan_" + format, read_method)
-    if read_method is None:
-        parser.error("unparseable spreadsheet format")
-    return read_method(queries, f) if format == "database" else read_method(f)
+
+    if format == "database":
+        return read_method(queries, x)
+    if queries:
+        parser.error("SQL queries only applicable to database format")
+    return read_method(x)
 
 
 def convert_yt_dlp_args(options, /):
